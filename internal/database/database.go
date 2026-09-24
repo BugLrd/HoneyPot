@@ -15,6 +15,16 @@ type Database struct {
 	db *sql.DB
 }
 
+type Stats struct {
+	TotalEvents      int64 `json:"total_events"`
+	TotalSessions    int64 `json:"total_sessions"`
+	UniqueIPs        int64 `json:"unique_ips"`
+	SuccessfulLogins int64 `json:"successful_logins"`
+	FailedLogins     int64 `json:"failed_logins"`
+	TotalCommands    int64 `json:"total_commands"`
+	UniqueCommands   int64 `json:"unique_commands"`
+}
+
 func New(path string) (*Database, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -29,6 +39,10 @@ func New(path string) (*Database, error) {
 	}
 
 	return d, nil
+}
+
+func (d *Database) Ping() error {
+	return d.db.Ping()
 }
 
 func (d *Database) createTables() error {
@@ -106,7 +120,7 @@ func (d *Database) SaveEvent(event event.Event) (int64, error) {
 
 	return result.LastInsertId()
 }
-func (d *Database) GetEvent(id int64) (*event.Event, error) {
+func (d *Database) GetEvent(id string) (*event.Event, error) {
 	event := &event.Event{}
 
 	err := d.db.QueryRow(`
@@ -217,6 +231,53 @@ func (d *Database) AllEvents() ([]event.Event, error) {
 	}
 
 	return events, nil
+}
+
+func (d *Database) Stats() (Stats, error) {
+	var stats Stats
+
+	err := d.db.QueryRow(`
+		SELECT
+			COUNT(*) AS total_events,
+
+			COUNT(DISTINCT session_id) AS total_sessions,
+
+			COUNT(DISTINCT source_ip) AS unique_ips,
+
+			COUNT(*) FILTER (
+				WHERE event_id = 'cowrie.login.success'
+			) AS successful_logins,
+
+			COUNT(*) FILTER (
+				WHERE event_id = 'cowrie.login.failed'
+			) AS failed_logins,
+
+			COUNT(*) FILTER (
+				WHERE event_id = 'cowrie.command.input'
+			) AS total_commands,
+
+			COUNT(DISTINCT command) FILTER (
+				WHERE event_id = 'cowrie.command.input'
+				AND command IS NOT NULL
+				AND command != ''
+			) AS unique_commands
+
+		FROM events
+	`).Scan(
+		&stats.TotalEvents,
+		&stats.TotalSessions,
+		&stats.UniqueIPs,
+		&stats.SuccessfulLogins,
+		&stats.FailedLogins,
+		&stats.TotalCommands,
+		&stats.UniqueCommands,
+	)
+
+	if err != nil {
+		return Stats{}, err
+	}
+
+	return stats, nil
 }
 
 func (d *Database) Close() error {

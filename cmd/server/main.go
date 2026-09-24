@@ -5,13 +5,14 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/BugLrd/HoneyPot-DashBoard/internal/api"
 	"github.com/BugLrd/HoneyPot-DashBoard/internal/collector"
 	"github.com/BugLrd/HoneyPot-DashBoard/internal/database"
 )
 
 func main() {
 	dbPath := "data/events.db"
-	jsonPath := "data/cowrie_events.json"
+	jsonPath := "/home/kai/Projects/cowrie/var/log/cowrie/cowrie.json"
 
 	// Ensure the parent directory exists before sqlite tries to write to it
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
@@ -29,10 +30,16 @@ func main() {
 	defer db.Close()
 
 	r := collector.NewReader(jsonPath, db)
-	count, err := r.Run(false)
-	if err != nil {
-		log.Fatalf("error reading events: %v", err)
-	}
+	go func() {
+		count, err := r.Run(true)
+		if err != nil {
+			log.Fatalf("error reading events: %v", err)
+		}
+		log.Printf("%d events imported successfully", count)
+	}()
 
-	log.Printf("%d events imported successfully", count)
+	server := api.NewServer(db)
+	if err := server.Start(":8080"); err != nil {
+		log.Fatalf("failed to start server: %v", err)
+	}
 }
