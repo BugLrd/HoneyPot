@@ -25,6 +25,21 @@ type Stats struct {
 	UniqueCommands   int64 `json:"unique_commands"`
 }
 
+type IpStats struct {
+	Ip               string `json:"ip"`
+	EventCount       int64  `json:"event_count"`
+	SessionCount     int64  `json:"session_count"`
+	FailedLogins     int64  `json:"failed_logins"`
+	SuccessfulLogins int64  `json:"successful_logins"`
+	TotalCommands    int64  `json:"total_commands"`
+	UniqueCommands   int64  `json:"unique_commands"`
+}
+
+type CommandStats struct {
+	Command      string `json:"command"`
+	CommandCount int64  `json:"command_count"`
+}
+
 func New(path string) (*Database, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -233,7 +248,7 @@ func (d *Database) AllEvents() ([]event.Event, error) {
 	return events, nil
 }
 
-func (d *Database) Stats() (Stats, error) {
+func (d *Database) GetStats() (Stats, error) {
 	var stats Stats
 
 	err := d.db.QueryRow(`
@@ -278,6 +293,118 @@ func (d *Database) Stats() (Stats, error) {
 	}
 
 	return stats, nil
+}
+
+func (d *Database) GetIpStats(ip string) (IpStats, error) {
+	var ipStats IpStats
+	err := d.db.QueryRow(`
+		SELECT
+			COUNT(*) AS event_count,
+			COUNT(DISTINCT session_id) AS session_count,
+			COUNT(*) FILTER (
+				WHERE event_id = 'cowrie.login.failed'
+			) AS failed_logins,
+			COUNT(*) FILTER (
+				WHERE event_id = 'cowrie.login.success'
+			) AS successful_logins,
+			COUNT(*) FILTER (
+				WHERE event_id = 'cowrie.command.input'
+			) AS total_commands,
+			COUNT(DISTINCT command) FILTER (
+				WHERE event_id = 'cowrie.command.input'
+				AND command IS NOT NULL
+				AND command != ''
+			) AS unique_commands
+		FROM events
+		WHERE source_ip = $1
+	`, ip).Scan(
+		&ipStats.EventCount,
+		&ipStats.SessionCount,
+		&ipStats.FailedLogins,
+		&ipStats.SuccessfulLogins,
+		&ipStats.TotalCommands,
+		&ipStats.UniqueCommands,
+	)
+
+	if err != nil {
+		return IpStats{}, err
+	}
+
+	return ipStats, nil
+}
+
+func (d *Database) GetEventsByIp(ip string) ([]event.Event, error) {
+	var events []event.Event
+	rows, err := d.db.Query(`
+		SELECT *
+		FROM events
+		WHERE source_ip = $1
+	`, ip)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var event event.Event
+		if err := rows.Scan(&event); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+
+	return events, nil
+}
+
+func (d *Database) GetCommandStats() ([]CommandStats, error) {
+	var commandStats []CommandStats
+	rows, err := d.db.Query(`
+		SELECT
+			command,
+			COUNT(*) AS command_count
+		FROM events
+		WHERE event_id = 'cowrie.command.input'
+		GROUP BY command
+		ORDER BY command_count DESC
+	`)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		var commandStat CommandStats
+		if err := rows.Scan(&commandStat.Command, &commandStat.CommandCount); err != nil {
+			return nil, err
+		}
+		commandStats = append(commandStats, commandStat)
+	}
+
+	return commandStats, nil
+}
+
+func (d *Database) GetEvensByCommand(command string) ([]event.Event, error) {
+	var events []event.Event
+	rows, err := d.db.Query(`
+		SELECT *
+		FROM events
+		WHERE event_id = 'cowrie.command.input'
+		AND command = $1
+	`, command)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var event event.Event
+		if err := rows.Scan(&event); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+
+	return events, nil
 }
 
 func (d *Database) Close() error {

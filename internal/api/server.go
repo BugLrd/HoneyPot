@@ -28,8 +28,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/", s.handleHealth)
 	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/event", s.handleEvent)
-	mux.HandleFunc("/event/{id}", s.handleEvent)
+	mux.HandleFunc("/event/{value}", s.handleEvent)
 	mux.HandleFunc("/stats", s.handleStats)
+	mux.HandleFunc("/ip", s.handleIpStats)
+	mux.HandleFunc("/ip/{ip}", s.handleIpStats)
+	mux.HandleFunc("/command", s.handleCommandStats)
+	mux.HandleFunc("/command/{command}", s.handleCommandStats)
 
 	return mux
 }
